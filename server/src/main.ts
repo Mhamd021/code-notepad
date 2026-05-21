@@ -8,8 +8,7 @@ async function bootstrap() {
   app.enableCors({
     origin: [
       'http://localhost:3000',
-      'https://code-notepad.vercel.app', 
-      /\.vercel\.app$/,  
+      'https://6a0ec00e51fe3e49da2684ec--code-notepad.netlify.app',
     ],
     credentials: true,
   });
