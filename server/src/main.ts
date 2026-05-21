@@ -11,10 +11,10 @@ async function bootstrap() {
     .filter(Boolean);
 
   app.enableCors({
-    origin: frontendUrls,
+   
     credentials: true,
   });
 
-  await app.listen(process.env.PORT ?? 3001);
+  await app.listen(process.env.PORT ?? 8080);
 }
 bootstrap();
