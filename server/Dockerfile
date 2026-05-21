@@ -14,4 +14,4 @@ RUN npx prisma generate
 RUN npm run build
 
 EXPOSE 3001
-CMD ["sh", "-c", "npx prisma migrate deploy && exec npm run start:prod"]
+ENTRYPOINT ["sh", "/app/docker-entrypoint.sh"]
