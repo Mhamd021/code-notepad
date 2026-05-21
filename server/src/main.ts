@@ -4,15 +4,17 @@ import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  
+
+  const frontendUrls = (process.env.FRONTEND_URLS ?? 'http://localhost:3000')
+    .split(',')
+    .map(o => o.trim())
+    .filter(Boolean);
+
   app.enableCors({
-    origin: [
-      'http://localhost:3000',
-      'https://6a0ec00e51fe3e49da2684ec--code-notepad.netlify.app',
-    ],
+    origin: frontendUrls,
     credentials: true,
   });
 
-  await app.listen(process.env.PORT || 3001);
+  await app.listen(process.env.PORT ?? 3001);
 }
 bootstrap();
