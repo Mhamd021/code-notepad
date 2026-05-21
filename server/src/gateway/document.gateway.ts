@@ -15,8 +15,12 @@ import { RedisService } from '../redis/redis.service';
 import { DocumentsService } from '../documents/documents.service';
 
 @WebSocketGateway({
-  cors: { origin: 'http://localhost:3000' },
+  cors: {
+    origin: '*',
+    credentials: false,
+  },
 })
+
 export class DocumentGateway
   implements OnGatewayConnection, OnGatewayDisconnect
 {
