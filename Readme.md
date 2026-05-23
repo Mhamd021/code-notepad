@@ -83,3 +83,7 @@ REDIS_URL=redis://localhost:6379
 - Language auto-detection
 - Save/export room as file
 - Redis Pub/Sub for multiple server instances
+
+## Live Demo
+🌐 Frontend: https://code-notepad.netlify.app
+⚙️ Backend: https://code-notepad-production.up.railway.app

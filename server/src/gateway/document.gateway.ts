@@ -20,7 +20,6 @@ import { DocumentsService } from '../documents/documents.service';
     credentials: false,
   },
 })
-
 export class DocumentGateway
   implements OnGatewayConnection, OnGatewayDisconnect
 {
@@ -28,6 +27,7 @@ export class DocumentGateway
   server!: Server;
 
   private rooms = new Map<string, DocumentState>();
+  private roomSockets = new Map<string, Set<string>>();
 
   constructor(
     private ot: OTService,
@@ -35,23 +35,23 @@ export class DocumentGateway
     private documents: DocumentsService,
   ) {}
 
-  private roomSockets = new Map<string, Set<string>>();
-
-
   async handleConnection(client: Socket) {
     console.log(`Client connected: ${client.id}`);
   }
 
   async handleDisconnect(client: Socket) {
-  for (const [roomId, sockets] of this.roomSockets) {
-    if (sockets.has(client.id)) {
-      sockets.delete(client.id);
-      this.server.to(roomId).emit('users-count', { 
-        count: sockets.size 
+    for (const [roomId, sockets] of this.roomSockets) {
+      if (!sockets.delete(client.id)) continue;
+
+      if (sockets.size === 0) {
+        this.roomSockets.delete(roomId);
+      }
+
+      this.server.to(roomId).emit('users-count', {
+        count: sockets.size,
       });
     }
   }
-}
 
   @SubscribeMessage('join-room')
   async handleJoinRoom(
@@ -62,30 +62,33 @@ export class DocumentGateway
 
     client.join(roomId);
 
+    const doc = await this.documents.findOne(roomId);
+
     if (!this.rooms.has(roomId)) {
-      const doc = await this.documents.findOne(roomId);
       this.rooms.set(roomId, {
         content: doc.content,
         version: 0,
         history: [],
       });
     }
+
     if (!this.roomSockets.has(roomId)) {
-    this.roomSockets.set(roomId, new Set());
-  }
-  this.roomSockets.get(roomId)!.add(client.id);
+      this.roomSockets.set(roomId, new Set());
+    }
+
+    this.roomSockets.get(roomId)!.add(client.id);
 
     const state = this.rooms.get(roomId)!;
 
     client.emit('room-joined', {
       content: state.content,
       version: state.version,
-      language: (await this.documents.findOne(roomId)).language,
+      language: doc.language,
     });
-    
-    this.server.to(roomId).emit('users-count', { 
-    count: this.roomSockets.get(roomId)!.size 
-  });
+
+    this.server.to(roomId).emit('users-count', {
+      count: this.roomSockets.get(roomId)!.size,
+    });
     client.to(roomId).emit('user-joined', { clientId });
   }
 
@@ -105,7 +108,11 @@ export class DocumentGateway
       return;
     }
 
-    
+    if (!this.hasValidOperationShape(operation)) {
+      client.emit('error', { message: 'Invalid operation' });
+      return;
+    }
+
     let transformedOp = operation;
 
     if (operation.version < state.version) {
@@ -115,6 +122,11 @@ export class DocumentGateway
 
     if (transformedOp.position === -1) {
       client.emit('operation-ack', { version: state.version });
+      return;
+    }
+
+    if (!this.isValidOperation(transformedOp, state.content.length)) {
+      client.emit('error', { message: 'Invalid transformed operation' });
       return;
     }
 
@@ -140,13 +152,33 @@ export class DocumentGateway
   @SubscribeMessage('change-language')
   async handleChangeLanguage(
     @MessageBody() data: { roomId: string; language: string },
-    @ConnectedSocket() client: Socket,
   ) {
     const { roomId, language } = data;
 
-   
     await this.documents.updateLanguage(roomId, language);
 
     this.server.to(roomId).emit('language-changed', { language });
+  }
+
+  private hasValidOperationShape(op: Operation) {
+    if (!Number.isInteger(op.version) || op.version < 0) return false;
+    if (!Number.isInteger(op.position) || op.position < 0) return false;
+    if (op.type !== 'insert' && op.type !== 'delete') return false;
+
+    if (op.type === 'insert') {
+      return typeof op.char === 'string' && op.char.length > 0;
+    }
+
+    return true;
+  }
+
+  private isValidOperation(op: Operation, contentLength: number) {
+    if (!this.hasValidOperationShape(op)) return false;
+
+    if (op.type === 'insert') {
+      return op.position <= contentLength;
+    }
+
+    return op.position < contentLength;
   }
 }

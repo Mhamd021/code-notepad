@@ -1,4 +1,5 @@
 'use client';
+
 import { useState, useEffect, useRef, useCallback, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { io, Socket } from 'socket.io-client';
@@ -9,10 +10,8 @@ import { java } from '@codemirror/lang-java';
 import { dracula } from '@uiw/codemirror-theme-dracula';
 import { EditorView, ViewUpdate } from '@codemirror/view';
 
-const WS  = process.env.NEXT_PUBLIC_WS_URL;
-const API = process.env.NEXT_PUBLIC_API_URL;
+const WS = process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:3001';
 
-// نوع الـ Operation — نفس ما في الـ backend
 interface Operation {
   type: 'insert' | 'delete';
   position: number;
@@ -21,23 +20,24 @@ interface Operation {
   version: number;
 }
 
-// اختر extension الـ language
 function getLanguageExtension(lang: string) {
   switch (lang) {
-    case 'python':     return python();
-    case 'java':       return java();
-    default:           return javascript({ typescript: lang === 'typescript' });
+    case 'python':
+      return python();
+    case 'java':
+      return java();
+    default:
+      return javascript({ typescript: lang === 'typescript' });
   }
 }
 
-// clientId فريد لكل tab
 const CLIENT_ID = Math.random().toString(36).slice(2);
 
 const LANGUAGES = [
   { value: 'javascript', label: 'JS' },
   { value: 'typescript', label: 'TS' },
-  { value: 'python',     label: 'PY' },
-  { value: 'java',       label: 'Java' },
+  { value: 'python', label: 'PY' },
+  { value: 'java', label: 'Java' },
 ];
 
 export default function RoomPage({
@@ -48,19 +48,19 @@ export default function RoomPage({
   const { roomId } = use(params);
   const router = useRouter();
 
-  const [content, setContent]   = useState('');
+  const [content, setContent] = useState('');
   const [language, setLanguage] = useState('javascript');
-  const [users, setUsers]       = useState(1);
+  const [users, setUsers] = useState(1);
   const [connected, setConnected] = useState(false);
-  const [copied, setCopied]     = useState(false);
-  const [version, setVersion]   = useState(0);
+  const [copied, setCopied] = useState(false);
+  const [version, setVersion] = useState(0);
 
-  const socketRef  = useRef<Socket | null>(null);
-  const versionRef = useRef(0); // نسخة ref لتجنب stale closure
-  const isRemote   = useRef(false); // هل التغيير قادم من السيرفر؟
+  const socketRef = useRef<Socket | null>(null);
+  const versionRef = useRef(0);
+  const isRemote = useRef(false);
 
   useEffect(() => {
-    const socket = io(WS!);
+    const socket = io(WS);
     socketRef.current = socket;
 
     socket.on('connect', () => {
@@ -70,7 +70,6 @@ export default function RoomPage({
 
     socket.on('disconnect', () => setConnected(false));
 
-    // استقبال الحالة عند الانضمام
     socket.on('room-joined', (data: {
       content: string;
       version: number;
@@ -81,52 +80,60 @@ export default function RoomPage({
       setLanguage(data.language);
       setVersion(data.version);
       versionRef.current = data.version;
-      setTimeout(() => { isRemote.current = false; }, 50);
+      setTimeout(() => {
+        isRemote.current = false;
+      }, 50);
     });
 
-    // استقبال operation من السيرفر
     socket.on('operation', (data: {
       operation: Operation;
       version: number;
       clientId: string;
     }) => {
-      // تجاهل عملياتنا نحن — السيرفر يرسلها للجميع بمن فيهم المرسل
       if (data.clientId === CLIENT_ID) {
         versionRef.current = data.version;
         setVersion(data.version);
         return;
       }
 
-      // طبّق الـ operation على المحتوى
       isRemote.current = true;
-      setContent(prev => {
+      setContent((prev) => {
         const op = data.operation;
-        if (op.type === 'insert') {
+
+        if (op.type === 'insert' && op.position !== -1) {
           return prev.slice(0, op.position) + op.char + prev.slice(op.position);
         }
-        if (op.type === 'delete') {
-          if (op.position < 0 || op.position >= prev.length) return prev;
+
+        if (
+          op.type === 'delete' &&
+          op.position >= 0 &&
+          op.position < prev.length
+        ) {
           return prev.slice(0, op.position) + prev.slice(op.position + 1);
         }
+
         return prev;
       });
       versionRef.current = data.version;
       setVersion(data.version);
-      setTimeout(() => { isRemote.current = false; }, 50);
+      setTimeout(() => {
+        isRemote.current = false;
+      }, 100);
     });
 
     socket.on('users-count', (data: { count: number }) => {
-  setUsers(data.count);
-});
+      setUsers(data.count);
+    });
 
     socket.on('language-changed', (data: { language: string }) => {
       setLanguage(data.language);
     });
 
-    return () => { socket.disconnect(); };
+    return () => {
+      socket.disconnect();
+    };
   }, [roomId]);
 
-  // لما يكتب المستخدم — نحوّل التغيير لـ operations
   const handleChange = useCallback((newValue: string, viewUpdate: ViewUpdate) => {
     if (isRemote.current) {
       setContent(newValue);
@@ -136,35 +143,40 @@ export default function RoomPage({
     const socket = socketRef.current;
     if (!socket) return;
 
-    // نستخرج التغييرات من CodeMirror
+    let nextVersion = versionRef.current;
+
     viewUpdate.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
+      void toB;
+
       const deletedCount = toA - fromA;
       const insertedText = inserted.toString();
 
-      // أولاً — أرسل delete operations
       for (let i = 0; i < deletedCount; i++) {
         const op: Operation = {
           type: 'delete',
           position: fromA,
           clientId: CLIENT_ID,
-          version: versionRef.current,
+          version: nextVersion,
         };
         socket.emit('operation', { roomId, operation: op });
+        nextVersion += 1;
       }
 
-      // ثانياً — أرسل insert operations
       for (let i = 0; i < insertedText.length; i++) {
         const op: Operation = {
           type: 'insert',
           position: fromB + i,
           char: insertedText[i],
           clientId: CLIENT_ID,
-          version: versionRef.current,
+          version: nextVersion,
         };
         socket.emit('operation', { roomId, operation: op });
+        nextVersion += 1;
       }
     });
 
+    versionRef.current = nextVersion;
+    setVersion(nextVersion);
     setContent(newValue);
   }, [roomId]);
 
@@ -181,20 +193,20 @@ export default function RoomPage({
 
   return (
     <div className="h-screen bg-gray-950 flex flex-col">
-
-      {/* Header */}
       <header className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-800 flex-shrink-0">
         <div className="flex items-center gap-3">
-          <button onClick={() => router.push('/')}
-            className="text-gray-500 hover:text-white text-sm transition-colors">
-            ← CodePad
+          <button
+            onClick={() => router.push('/')}
+            className="text-gray-500 hover:text-white text-sm transition-colors"
+          >
+            {'<- CodePad'}
           </button>
           <div className={`flex items-center gap-1.5 text-xs ${
             connected ? 'text-green-400' : 'text-red-400'
           }`}>
             <div className={`w-1.5 h-1.5 rounded-full ${
               connected ? 'bg-green-400' : 'bg-red-400'
-            }`}/>
+            }`} />
             {connected ? 'Connected' : 'Reconnecting...'}
           </div>
           <span className="text-gray-600 text-xs">
@@ -203,30 +215,31 @@ export default function RoomPage({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Language selector */}
           <div className="flex gap-1">
-            {LANGUAGES.map(l => (
-              <button key={l.value}
+            {LANGUAGES.map((l) => (
+              <button
+                key={l.value}
                 onClick={() => changeLanguage(l.value)}
                 className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
                   language === l.value
                     ? 'bg-blue-600 text-white'
                     : 'text-gray-500 hover:text-white'
-                }`}>
+                }`}
+              >
                 {l.label}
               </button>
             ))}
           </div>
 
-          {/* Copy link */}
-          <button onClick={copyLink}
-            className="bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs px-3 py-1.5 rounded-lg transition-colors">
-            {copied ? '✓ Copied!' : '🔗 Share'}
+          <button
+            onClick={copyLink}
+            className="bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs px-3 py-1.5 rounded-lg transition-colors"
+          >
+            {copied ? 'Copied!' : 'Share'}
           </button>
         </div>
       </header>
 
-      {/* Editor */}
       <div className="flex-1 overflow-hidden">
         <CodeMirror
           value={content}
@@ -247,16 +260,14 @@ export default function RoomPage({
         />
       </div>
 
-      {/* Footer */}
       <div className="px-4 py-1.5 bg-gray-900 border-t border-gray-800 flex items-center justify-between">
         <span className="text-gray-600 text-xs font-mono">
           room: {roomId.slice(0, 8)}...
         </span>
         <span className="text-gray-600 text-xs">
-          v{version} · OT sync
+          v{version} - OT sync
         </span>
       </div>
-
     </div>
   );
 }

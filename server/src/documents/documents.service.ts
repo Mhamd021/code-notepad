@@ -17,10 +17,12 @@ export class DocumentsService {
 
     await this.redis.setDocument(doc.id, '');
 
+    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+
     return {
       roomId: doc.id,
       language: doc.language,
-      url: `http://localhost:3000/room/${doc.id}`,
+      url: `${frontendUrl}/room/${doc.id}`,
     };
   }
 
@@ -50,9 +52,9 @@ export class DocumentsService {
   }
 
   async updateLanguage(roomId: string, language: string) {
-  return this.prisma.document.update({
-    where: { id: roomId },
-    data: { language },
-  });
-}
+    return this.prisma.document.update({
+      where: { id: roomId },
+      data: { language },
+    });
+  }
 }
